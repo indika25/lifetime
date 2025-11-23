@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Life Timer Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar for better aesthetics */
+        body { scrollbar-color: #4f46e5 #1f2937; scrollbar-width: thin; }
+        /* Style for the nanosecond text, which updates frequently */
+        #nanoseconds-lived { transition: color 0.05s ease; }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#4f46e5', // Indigo-600
+                        'secondary': '#1f2937', // Gray-800
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-900 text-white font-sans min-h-screen p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-primary mb-2">The Life Timer</h1>
+            <p class="text-gray-400 text-lg">Calculate every moment lived and every moment remaining.</p>
+        </header>
+
+        <!-- Input Panel -->
+        <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl mb-10 border border-primary/50">
+            <h2 class="text-2xl font-semibold mb-4 text-white">Your Data</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="dob" class="block text-sm font-medium text-gray-300 mb-1">Your Date of Birth (DOB)</label>
+                    <input type="date" id="dob" value="2000-01-01"
+                           class="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-primary focus:border-primary">
+                </div>
+                <div>
+                    <label for="target-age" class="block text-sm font-medium text-gray-300 mb-1">Target Lifespan (Years)</label>
+                    <input type="number" id="target-age" value="80" min="1" max="150"
+                           class="w-full p-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-primary focus:border-primary">
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Sections -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <!-- Time Lived Panel -->
+            <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl border border-green-500/50">
+                <div class="flex items-center space-x-3 mb-4">
+                    <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <h2 class="text-2xl font-bold text-green-400">Time Lived (Since DOB)</h2>
+                </div>
+                <div id="lived-results" class="space-y-4">
+                    <!-- Results populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Time Remaining Panel -->
+            <div class="bg-gray-800 p-6 sm:p-8 rounded-xl shadow-2xl border border-red-500/50">
+                <div class="flex items-center space-x-3 mb-4">
+                    <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2m-7 7h2"></path></svg>
+                    <h2 class="text-2xl font-bold text-red-400">Time Remaining (Until <span id="target-year-display">80</span>)</h2>
+                </div>
+                <div id="remaining-results" class="space-y-4">
+                    <!-- Results populated by JavaScript -->
+                </div>
+                <p id="target-date-info" class="text-sm text-gray-400 mt-4 pt-4 border-t border-gray-700"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dobInput = document.getElementById('dob');
+            const targetAgeInput = document.getElementById('target-age');
+            const livedResults = document.getElementById('lived-results');
+            const remainingResults = document.getElementById('remaining-results');
+            const targetYearDisplay = document.getElementById('target-year-display');
+            const targetDateInfo = document.getElementById('target-date-info');
+
+            // Constants for time conversion
+            const MS_PER_SECOND = 1000;
+            const MS_PER_MINUTE = MS_PER_SECOND * 60;
+            const MS_PER_HOUR = MS_PER_MINUTE * 60;
+            const MS_PER_DAY = MS_PER_HOUR * 24;
+            const MS_PER_YEAR = MS_PER_DAY * 365.2425; // Accounting for leap years
+
+            // Constants for precision (sub-millisecond units are theoretical)
+            const NS_PER_MS = 1000000;
+
+            /**
+             * Formats a large number with commas for readability.
+             * @param {number} num
+             * @returns {string}
+             */
+            const formatNumber = (num) => {
+                if (typeof num === 'bigint') {
+                    // BigInts cannot use toLocaleString directly in all environments, so we convert to string and format manually.
+                    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                }
+                return num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+            };
+
+            /**
+             * Renders a single result row.
+             * @param {string} label - The unit label (e.g., 'Days').
+             * @param {bigint|number} value - The calculated value.
+             * @param {string} id - The element ID for updating (optional).
+             * @param {string} colorClass - Tailwind color class for the value.
+             * @returns {string} HTML string
+             */
+            const renderResultRow = (label, value, id, colorClass) => {
+                return `
+                    <div class="flex justify-between items-center py-2 border-b border-gray-700 last:border-b-0">
+                        <span class="text-gray-400 font-medium">${label}</span>
+                        <span id="${id || ''}" class="text-right font-mono text-xl ${colorClass}">
+                            ${formatNumber(value)}
+                        </span>
+                    </div>
+                `;
+            };
+
+            /**
+             * Calculates and displays the time lived and time remaining.
+             */
+            function updateLifeTimer() {
+                const dob = new Date(dobInput.value);
+                const targetAge = parseInt(targetAgeInput.value, 10);
+
+                if (isNaN(dob.getTime()) || dob.getTime() >= Date.now() || targetAge < 1) {
+                    livedResults.innerHTML = '<p class="text-yellow-400">Please enter a valid date of birth and target age.</p>';
+                    remainingResults.innerHTML = '';
+                    targetDateInfo.textContent = '';
+                    return;
+                }
+
+                // --- 1. Calculate Time Lived ---
+                const now = Date.now();
+                let msLived = now - dob.getTime();
+                let nsFraction = 0; // Nanosecond fraction of the current millisecond
+
+                // Add sub-millisecond precision for the "nanoseconds lived" counter
+                // This is a dynamic, visual counter that updates every millisecond tick
+                const startTime = performance.now();
+                const nowTime = performance.now();
+                const timeInMs = nowTime - startTime; // This gives the current offset in the ms tick (usually near 0)
+                nsFraction = Math.floor((timeInMs % 1) * NS_PER_MS);
+
+                const unitsLived = calculateUnits(msLived, nsFraction);
+
+                // Update Lived Results
+                livedResults.innerHTML = `
+                    ${renderResultRow('Years', unitsLived.years, 'years-lived', 'text-green-300')}
+                    ${renderResultRow('Days', unitsLived.days, 'days-lived', 'text-green-300')}
+                    ${renderResultRow('Hours', unitsLived.hours, 'hours-lived', 'text-green-300')}
+                    ${renderResultRow('Minutes', unitsLived.minutes, 'minutes-lived', 'text-green-300')}
+                    ${renderResultRow('Seconds', unitsLived.seconds, 'seconds-lived', 'text-green-300')}
+                    ${renderResultRow('Milliseconds', unitsLived.milliseconds, 'ms-lived', 'text-green-300')}
+                    ${renderResultRow('Nanoseconds (Visual)', unitsLived.nanoseconds, 'nanoseconds-lived', 'text-green-300')}
+                `;
+                // Manually update nanoseconds for the animation effect
+                document.getElementById('nanoseconds-lived').textContent = formatNumber(unitsLived.nanoseconds);
+                document.getElementById('nanoseconds-lived').classList.toggle('text-green-400', nsFraction > 500000);
+
+
+                // --- 2. Calculate Time Remaining ---
+                targetYearDisplay.textContent = targetAge;
+                const targetDate = new Date(dob.getFullYear() + targetAge, dob.getMonth(), dob.getDate(), dob.getHours(), dob.getMinutes(), dob.getSeconds());
+                const msRemaining = targetDate.getTime() - now;
+
+                const targetDateFormatted = targetDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                targetDateInfo.textContent = `You are projected to reach this target on: ${targetDateFormatted}`;
+
+
+                if (msRemaining <= 0) {
+                    remainingResults.innerHTML = '<p class="text-xl font-semibold text-yellow-500">Congratulations! You have surpassed your target age of ' + targetAge + ' years.</p>';
+                } else {
+                    const unitsRemaining = calculateUnits(msRemaining, 0); // Nanosecond fraction is ignored for remaining time
+
+                    remainingResults.innerHTML = `
+                        ${renderResultRow('Years', unitsRemaining.years, 'years-remaining', 'text-red-300')}
+                        ${renderResultRow('Days', unitsRemaining.days, 'days-remaining', 'text-red-300')}
+                        ${renderResultRow('Hours', unitsRemaining.hours, 'hours-remaining', 'text-red-300')}
+                        ${renderResultRow('Minutes', unitsRemaining.minutes, 'minutes-remaining', 'text-red-300')}
+                        ${renderResultRow('Seconds', unitsRemaining.seconds, 'seconds-remaining', 'text-red-300')}
+                        ${renderResultRow('Milliseconds', unitsRemaining.milliseconds, 'ms-remaining', 'text-red-300')}
+                        ${renderResultRow('Nanoseconds (Visual)', unitsRemaining.nanoseconds, 'nanoseconds-remaining', 'text-red-300')}
+                    `;
+                    // Manually update nanoseconds for the animation effect
+                    document.getElementById('nanoseconds-remaining').textContent = formatNumber(unitsRemaining.nanoseconds);
+                }
+            }
+
+            /**
+             * Converts total milliseconds into structured time units.
+             * @param {number} totalMs - Total milliseconds.
+             * @param {number} nsFraction - Additional nanoseconds for the lived counter.
+             * @returns {{years: number, days: number, hours: number, minutes: number, seconds: number, milliseconds: number, nanoseconds: bigint}}
+             */
+            const calculateUnits = (totalMs, nsFraction) => {
+                const totalNs = BigInt(Math.floor(totalMs)) * BigInt(NS_PER_MS) + BigInt(nsFraction);
+
+                // Floating point calculations are required for years and days based on the total time elapsed
+                const years = totalMs / MS_PER_YEAR;
+                const days = totalMs / MS_PER_DAY;
+                const hours = totalMs / MS_PER_HOUR;
+                const minutes = totalMs / MS_PER_MINUTE;
+                const seconds = totalMs / MS_PER_SECOND;
+                const milliseconds = totalMs;
+
+                return {
+                    // Use Math.floor to ensure we only show the total elapsed units, not the remaining fractions
+                    years: Math.floor(years),
+                    days: Math.floor(days),
+                    hours: Math.floor(hours),
+                    minutes: Math.floor(minutes),
+                    seconds: Math.floor(seconds),
+                    milliseconds: Math.floor(milliseconds),
+                    nanoseconds: totalNs, // Use BigInt for large, precise nanosecond representation
+                };
+            };
+
+
+            // Initial load and input change listeners
+            dobInput.addEventListener('change', updateLifeTimer);
+            targetAgeInput.addEventListener('input', updateLifeTimer);
+
+            // Set a default DOB close to a round number for easier testing
+            dobInput.value = '1995-10-27';
+
+            // Update every 50 milliseconds to keep the second/millisecond/nanosecond counters smooth
+            setInterval(updateLifeTimer, 50);
+
+            // Run once immediately on load
+            updateLifeTimer();
+        });
+    </script>
+</body>
+</html>
